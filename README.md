@@ -1,40 +1,44 @@
-# Token Bell
+# 🔔 Token Bell
 
-A [Decky Loader](https://decky.xyz) plugin for the Steam Deck: your Claude plan limits in the
-Quick Access Menu, and a ping in game when a limit resets.
+**Out of Claude tokens? Go play. Token Bell rings when they're back.**
 
 ![Token Bell open over Valheim](assets/token-bell-valheim.png)
 
-Max out your session, go play something, and get a Steam notification over the game when the
-session is back.
+You hit your limit mid-flow. The reset is three hours away. You could stare at a countdown, or
+you could go build a longhouse, sail into a storm and get chased by a troll.
 
-- **Limits:** session (5-hour), weekly and per-model weekly, each with a bar and the time to reset.
-  They are account-wide, so usage on other machines counts.
-- **Bells:** press A on a limit to turn its bell on or off. A limit with its bell on gives a
-  notification with sound when it resets, if it was used at all.
-- **Sign in:** uses the Claude Code login on the Deck. Without one, "Sign in to Claude" installs
-  Claude Code with Anthropic's installer and runs its `claude auth login`: sign in in Steam's
-  browser and it finishes by itself, or scan the QR code with a phone and type in the code it shows.
+Token Bell is a [Decky Loader](https://decky.xyz) plugin for the Steam Deck that keeps an eye on
+your Claude limits while you play. The moment your tokens refill, a notification drops in right
+over your game. Finish the fight, put the controller down, get back to shipping.
 
-## How it works
+## What you get
 
-`main.py` runs the Claude usage counter in `vendor/claude-usage` every five
-minutes and when a reset is due, and sends the result to the panel (`src/index.tsx`). The reset
-time is known in advance, so the ping doesn't need the network at that moment.
+- **Your limits at a glance.** Session, weekly and per-model weekly, each with a bar and a
+  countdown, one button press away in the Quick Access Menu. No alt-tabbing, no browser.
+- **A bell on every limit.** Press A to arm it. When that limit resets, you hear it and see it,
+  in whatever game you're in.
+- **Your whole account.** Burned your session on the laptop? The Deck knows.
+- **Sign in once.** Already use Claude Code on your Deck? It just works. If not, one button
+  signs you in.
+
+## Install
+
+```sh
+npm install
+tools/package.sh          # builds out/token-bell.zip
+node tools/install.mjs    # asks Decky to install it; confirm on the Deck
+```
+
+Or install the zip by hand from Decky's settings: Developer > Install plugin from ZIP.
+
+## Under the hood
+
+`main.py` runs a Claude usage counter every five minutes and whenever a reset is due, and the
+panel (`src/index.tsx`) draws what it reports. Reset times are known ahead, so the bell rings on
+time even if the Deck is offline at that moment.
 
 ## Credit
 
 The numbers come from [`omarchy-agent-usage-claude`](https://github.com/basecamp/omarchy/blob/master/bin/omarchy-agent-usage-claude),
-the Claude usage counter this plugin was forked from, included unchanged under its MIT licence
+the Claude usage counter Token Bell was forked from, included unchanged under its MIT licence
 (`vendor/claude-usage`).
-
-## Build and install
-
-```sh
-npm install
-tools/package.sh          # builds and packs out/token-bell.zip
-node tools/install.mjs    # asks Decky to install it; confirm the prompt in the Steam UI
-```
-
-`tools/install.mjs` talks to Steam's debug port (localhost:8080), which needs Decky's developer
-mode. The zip can also be installed from Decky's settings (Developer > Install plugin from ZIP).
