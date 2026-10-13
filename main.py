@@ -1,6 +1,6 @@
 """Token Bell, a Claude usage tracker for the Quick Access Menu: backend.
 
-Runs Omarchy's agent usage script (vendor/omarchy) every few minutes, hands the panel the plan
+Runs Omarchy's agent usage script (vendor/claude-usage) every few minutes, hands the panel the plan
 limits, and announces a limit's reset when its bell is on. Signing in is left to Claude Code
 itself (`claude auth login`), which the plugin installs and drives for people who don't have it.
 """
@@ -34,11 +34,24 @@ def child_env():
     env["HOME"] = home
     env["USER"] = decky.DECKY_USER
     env["PATH"] = f"{home}/.local/bin:" + env.get("PATH", "/usr/local/bin:/usr/bin:/bin")
+    if saved().get("config_dir"):
+        env["CLAUDE_CONFIG_DIR"] = saved()["config_dir"]
     return env
 
 
+def saved():
+    try:
+        with open(STATE_FILE) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def claude_dir():
-    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(decky.DECKY_USER_HOME, ".claude")
+    """Where Claude Code keeps its login; "config_dir" in state.json points it elsewhere."""
+    return saved().get("config_dir") or os.environ.get("CLAUDE_CONFIG_DIR") \
+        or os.path.join(decky.DECKY_USER_HOME, ".claude")
 
 
 def claude_bin():
@@ -51,8 +64,9 @@ def signed_in():
 
 
 class Login:
-    """Signs in through Claude Code's own `claude auth login`: it prints a web address, the user
-    signs in there and gets a code, and the code goes back to it on stdin."""
+    """Signs in through Claude Code's own `claude auth login`. It offers two pages: one that hands
+    the result straight back to it on this machine (for Steam's browser), and one that shows a code
+    to type in (for a phone, behind the QR code)."""
 
     def __init__(self, usage):
         self.usage = usage
@@ -68,9 +82,9 @@ class Login:
         if self.state["step"] in ("installing", "starting", "checking"):
             return
         self.cancel()
-        self.task = asyncio.create_task(self.begin())
+        self.task = asyncio.create_task(self.run())
 
-    async def begin(self):
+    async def run(self):
         try:
             if not claude_bin():
                 self.set("installing")
@@ -81,75 +95,89 @@ class Login:
                 if not claude_bin():
                     return self.set("error", error="Couldn't install Claude Code. Check the internet connection.")
             self.set("starting")
+            # Claude Code hands the same-machine page to $BROWSER; catch it instead of opening it
+            os.makedirs(decky.DECKY_PLUGIN_RUNTIME_DIR, exist_ok=True)
+            grab = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "browser.sh")
+            local = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "browser-url")
+            with open(grab, "w") as f:
+                f.write(f'#!/bin/sh\nprintf %s "$1" > "{local}"\n')
+            os.chmod(grab, 0o700)
+            if os.path.exists(local):
+                os.remove(local)
             env = child_env()
-            env["BROWSER"] = "/bin/true"  # the panel opens the page, not xdg-open
-            self.proc = await asyncio.create_subprocess_exec(
+            env["BROWSER"] = grab
+            proc = self.proc = await asyncio.create_subprocess_exec(
                 claude_bin(), "auth", "login", env=env, start_new_session=True, stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
-            self.output = ""
-            deadline = time.time() + 30
-            while time.time() < deadline:
-                chunk = await asyncio.wait_for(self.proc.stdout.read(4096), max(0.1, deadline - time.time()))
+            output, url, deadline = "", None, time.time() + 30
+            while not url and time.time() < deadline:
+                chunk = await asyncio.wait_for(proc.stdout.read(4096), max(0.1, deadline - time.time()))
                 if not chunk:
                     break
-                self.output += chunk.decode(errors="replace")
-                found = re.search(r"https://\S+", self.output)
-                if found and "Paste code" in self.output:
-                    return self.set("code", url=found.group(0))
-            self.set("error", error="Claude Code didn't offer a sign-in page.")
+                output += chunk.decode(errors="replace")
+                found = re.search(r"https://\S+", output)
+                if found and "Paste code" in output:
+                    url = found.group(0)
+            if not url:
+                return self.set("error", error="Claude Code didn't offer a sign-in page.")
+            for _ in range(20):  # the browser is called a moment after the address is printed
+                if os.path.exists(local):
+                    break
+                await asyncio.sleep(0.1)
+            local_url = open(local).read().strip() if os.path.exists(local) else ""
+            self.set("code", url=url, local_url=local_url)
+            await asyncio.wait_for(proc.wait(), 900)  # ends by itself once either page is completed
+            if proc.returncode == 0 and signed_in():
+                self.set("idle")
+                self.usage.force = True
+                self.usage.wake.set()
+            elif self.state["step"] == "checking":
+                self.set("error", error="That code wasn't accepted. Start the sign-in again.")
+            else:
+                self.set("error", error="The sign-in didn't complete.")
         except asyncio.TimeoutError:
+            self.kill()
             self.set("error", error="Timed out.")
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            decky.logger.exception("sign-in failed to start")
+            decky.logger.exception("sign-in failed")
+            self.kill()
             self.set("error", error="Couldn't start the sign-in.")
 
     async def submit(self, code):
         proc = self.proc
-        if self.state["step"] != "code" or not proc or not code.strip():
+        if self.state["step"] != "code" or not proc or proc.returncode is not None or not code.strip():
             return
-        url = self.state.get("url")
         self.set("checking")
         try:
             proc.stdin.write(code.strip().encode() + b"\n")
             await proc.stdin.drain()
-            out, _ = await asyncio.wait_for(proc.communicate(), 45)
-            ok = proc.returncode == 0 and signed_in()
-        except (asyncio.TimeoutError, OSError):
-            ok = False
-        if ok:
-            self.proc = None
-            self.set("idle")
-            self.usage.force = True
-            self.usage.wake.set()
-        elif proc.returncode is None:  # still asking: let the user try the code again
-            self.set("code", url=url, error="That code wasn't accepted.")
-        else:
-            self.proc = None
-            self.set("error", error="That code wasn't accepted. Start the sign-in again.")
+        except OSError:
+            pass  # run() reports how it ended
 
-    def cancel(self):
-        if self.task:
-            self.task.cancel()
+    def kill(self):
         if self.proc and self.proc.returncode is None:
             try:
                 os.killpg(self.proc.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
         self.proc = None
+
+    def cancel(self):
+        if self.task:
+            self.task.cancel()
+        self.kill()
         self.set("idle")
 
 
 class Usage:
-    """Plan limits, collected by Omarchy's agent usage script (vendor/omarchy)."""
+    """Plan limits, collected by Omarchy's agent usage script (vendor/claude-usage)."""
 
     def __init__(self):
         self.data = {"limits": [], "updated": 0, "error": None, "plan": "", "signed_in": signed_in()}
         self.bells = dict(DEFAULT_BELLS)
-        try:
-            with open(STATE_FILE) as f:
-                self.bells.update(json.load(f).get("bells") or {})
-        except (OSError, ValueError, AttributeError):
-            pass
+        self.bells.update(saved().get("bells") or {})
         self.dirty = False
         self.pings = []       # labels of limits that just reset, for the panel to announce
         self.pinged = set()
@@ -162,7 +190,7 @@ class Usage:
         try:
             os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
             with open(STATE_FILE, "w") as f:
-                json.dump({"bells": self.bells}, f)
+                json.dump({**saved(), "bells": self.bells}, f)
         except OSError:
             decky.logger.exception("could not save the bells")
         self.data = {**self.data, "limits": [{**l, "bell": bool(self.bells.get(l["label"]))}
@@ -203,8 +231,8 @@ class Usage:
         self.dirty = True
 
     async def fetch(self, force=False):
-        """Run Omarchy's collector (vendor/omarchy) and keep the parts of its record the panel draws."""
-        script = os.path.join(decky.DECKY_PLUGIN_DIR, "vendor/omarchy/omarchy-agent-usage-claude")
+        """Run Omarchy's collector (vendor/claude-usage) and keep the parts of its record the panel draws."""
+        script = os.path.join(decky.DECKY_PLUGIN_DIR, "vendor/claude-usage/omarchy-agent-usage-claude")
         proc = await asyncio.create_subprocess_exec(
             "/usr/bin/python3", script, "--limits-only", *(["--force"] if force else []), env=child_env(),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)

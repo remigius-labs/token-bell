@@ -13,14 +13,20 @@ session is back.
 - **Bells:** press A on a limit to turn its bell on or off. A limit with its bell on gives a
   notification with sound when it resets, if it was used at all.
 - **Sign in:** uses the Claude Code login on the Deck. Without one, "Sign in to Claude" installs
-  Claude Code with Anthropic's installer and runs its `claude auth login`: sign in on a phone
-  (QR code) or in Steam's browser, then type the code it shows.
+  Claude Code with Anthropic's installer and runs its `claude auth login`: sign in in Steam's
+  browser and it finishes by itself, or scan the QR code with a phone and type in the code it shows.
 
 ## How it works
 
-`main.py` runs Omarchy's Claude usage collector (`vendor/omarchy`, unchanged, MIT) every five
+`main.py` runs the Claude usage counter in `vendor/claude-usage` every five
 minutes and when a reset is due, and sends the result to the panel (`src/index.tsx`). The reset
 time is known in advance, so the ping doesn't need the network at that moment.
+
+## Credit
+
+The numbers come from [`omarchy-agent-usage-claude`](https://github.com/basecamp/omarchy/blob/master/bin/omarchy-agent-usage-claude),
+the Claude usage counter this plugin was forked from, included unchanged under its MIT licence
+(`vendor/claude-usage`).
 
 ## Build and install
 

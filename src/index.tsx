@@ -20,7 +20,8 @@ interface UsageState {
 }
 interface LoginState {
   step: "idle" | "installing" | "starting" | "code" | "checking" | "error";
-  url?: string;
+  url?: string; // shows a code to type in: for a phone
+  local_url?: string; // hands the result back on this machine: for Steam's browser
   error?: string;
 }
 
@@ -113,17 +114,12 @@ function SignIn() {
       <>
         <PanelSectionRow>
           <div className="cc-login">
-            Sign in to Claude on your phone with this code, or open the page here. Then type the code it shows you.
+            Scan this with your phone and sign in to Claude. It then shows a code: type it in here.
             <div className="cc-qr">
               <QRCodeSVG value={login.url} size={220} level="L" />
             </div>
             {login.error && <div className="cc-error">{login.error}</div>}
           </div>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <ButtonItem layout="below" onClick={() => Navigation.NavigateToExternalWeb(login.url!)}>
-            Open the page here
-          </ButtonItem>
         </PanelSectionRow>
         <PanelSectionRow>
           <TextField
@@ -137,7 +133,18 @@ function SignIn() {
         </PanelSectionRow>
         <PanelSectionRow>
           <ButtonItem layout="below" disabled={!store.code.trim()} onClick={() => loginCode(store.code)}>
-            Finish sign-in
+            Use this code
+          </ButtonItem>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={() => {
+              Navigation.NavigateToExternalWeb(login.local_url || login.url!);
+              Navigation.CloseSideMenus();
+            }}
+          >
+            Sign in on this Deck instead
           </ButtonItem>
         </PanelSectionRow>
         <PanelSectionRow>
@@ -163,7 +170,7 @@ function SignIn() {
   );
 }
 
-// Laid out after Omarchy's Agents panel: plan, then a meter and time-to-reset per limit.
+// Plan, then a meter and time-to-reset per limit, as in the panel the usage counter was written for.
 function Content() {
   useStore();
   const visible = useQuickAccessVisible();
