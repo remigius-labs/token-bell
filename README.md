@@ -38,9 +38,3 @@ node tools/install.mjs    # asks Decky to install it; confirm the prompt in the 
 
 `tools/install.mjs` talks to Steam's debug port (localhost:8080), which needs Decky's developer
 mode. The zip can also be installed from Decky's settings (Developer > Install plugin from ZIP).
-
-## Good to know
-
-- A Claude login is only renewed when Claude Code itself runs. If it never runs, the limits pause
-  after about eight hours and the ping falls back to the last known reset time.
-- The usage endpoint the collector reads is not a documented API and may change.
