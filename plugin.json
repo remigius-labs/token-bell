@@ -1,0 +1,11 @@
+{
+  "name": "Token Bell",
+  "author": "remigius-labs",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["utility", "ai"],
+    "description": "Claude plan limits and token counts in the Quick Access Menu, with a ping in game when a limit resets.",
+    "image": "https://opengraph.githubassets.com/1/SteamDeckHomebrew/PluginLoader"
+  }
+}
